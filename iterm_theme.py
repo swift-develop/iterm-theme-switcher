@@ -216,11 +216,56 @@ async def pick_theme(favorites, all_names=None, connection=None, session=None, p
 
     return result_name
 
+HELP_TEXT = """\
+Usage: iterm_theme.py [OPTIONS]
+
+  Interactive iTerm2 theme switcher.
+
+Options:
+  -f, --full     Show all installed themes, not just favorites
+  -p, --preview  Preview themes live as you scroll
+  -h, --help     Show this message and exit
+
+Keys:
+  ↑ ↓ / PgUp PgDn   Navigate
+  Enter              Apply selected theme
+  Space              Toggle favorite (full mode only)
+  q                  Quit without applying
+"""
+
+KNOWN_FLAGS = {"-f", "--full", "-p", "--preview", "-h", "--help"}
+SHORT_FLAGS = {"f", "p", "h"}
+
+
+def expand_args(argv):
+    """Expand combined short flags like -fp into ['-f', '-p']."""
+    expanded = []
+    for arg in argv:
+        if arg.startswith("-") and not arg.startswith("--") and len(arg) > 2:
+            for ch in arg[1:]:
+                expanded.append(f"-{ch}")
+        else:
+            expanded.append(arg)
+    return expanded
+
+
 async def main(connection):
     favorites = load_favorites()
-    args = set(sys.argv[1:])
-    full_mode = "--full" in args or "-f" in args
-    preview_mode = "--preview" in args or "-p" in args
+    args = expand_args(sys.argv[1:])
+    arg_set = set(args)
+
+    if "-h" in arg_set or "--help" in arg_set:
+        print(HELP_TEXT, end="")
+        os._exit(0)
+
+    unknown = [a for a in args if a not in KNOWN_FLAGS]
+    if unknown:
+        print(f"Error: unknown option(s): {' '.join(unknown)}\n")
+        print(HELP_TEXT, end="")
+        os._exit(1)
+
+    full_mode = "--full" in arg_set or "-f" in arg_set
+    preview_mode = "--preview" in arg_set or "-p" in arg_set
     all_names = load_all_theme_names() if full_mode else None
 
     session = None
