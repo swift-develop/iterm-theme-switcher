@@ -69,10 +69,11 @@ async def apply_preset(connection, session, name):
     except Exception:
         pass
 
-def render(items, sel, offset, full_mode):
+def render(items, sel, offset, full_mode, preview):
     visible = min(WINDOW_SIZE, len(items))
     sys.stdout.write("\033[H\033[J")
-    sys.stdout.write("iTerm2 Theme Switcher\r\n")
+    preview_tag = "  \033[2m[preview]\033[0m" if preview else ""
+    sys.stdout.write(f"iTerm2 Theme Switcher{preview_tag}\r\n")
     sys.stdout.write("─" * 30 + "\r\n")
     for i in range(visible):
         idx = offset + i
@@ -93,7 +94,7 @@ def render(items, sel, offset, full_mode):
             fmt = "\033[7m" if highlighted else "\033[2m"
         sys.stdout.write(f"{fmt}{line}\033[0m\r\n")
     scroll = f"  ({offset + 1}–{offset + min(WINDOW_SIZE, len(items))} of {len(items)})" if len(items) > WINDOW_SIZE else ""
-    hints = ["↑↓ PgUp/Dn", "Enter=apply"]
+    hints = ["↑↓ PgUp/Dn", "Enter=apply", "p=preview"]
     if full_mode:
         hints.append("Space=favorite")
     hints.append("q=quit")
@@ -147,7 +148,7 @@ async def pick_theme(favorites, all_names=None, connection=None, session=None, p
     try:
         tty.setraw(fd)
         while True:
-            render(items, sel, offset, full_mode)
+            render(items, sel, offset, full_mode, preview)
             ch = await loop.run_in_executor(None, read_char)
             preview_name = None
 
@@ -169,6 +170,20 @@ async def pick_theme(favorites, all_names=None, connection=None, session=None, p
                 if item is not None:
                     result_name = item[0]
                 break
+
+            elif ch == "p" and connection and session:
+                if not preview:
+                    profile = await session.async_get_profile()
+                    original_colors = await save_colors(profile)
+                    preview = True
+                    if items[sel] is not None:
+                        await apply_preset(connection, session, items[sel][0])
+                else:
+                    if original_colors:
+                        profile = await session.async_get_profile()
+                        await restore_colors(profile, original_colors)
+                    original_colors = None
+                    preview = False
 
             elif ch == " " and full_mode:
                 item = items[sel]
@@ -229,6 +244,7 @@ Options:
 Keys:
   ↑ ↓ / PgUp PgDn   Navigate
   Enter              Apply selected theme
+  p                  Toggle live preview
   Space              Toggle favorite (full mode only)
   q                  Quit without applying
 """
@@ -268,14 +284,12 @@ async def main(connection):
     preview_mode = "--preview" in arg_set or "-p" in arg_set
     all_names = load_all_theme_names() if full_mode else None
 
-    session = None
-    if preview_mode:
-        app = await iterm2.async_get_app(connection)
-        session = app.current_terminal_window.current_tab.current_session
+    app = await iterm2.async_get_app(connection)
+    session = app.current_terminal_window.current_tab.current_session
 
     name = await pick_theme(
         favorites, all_names,
-        connection=connection if preview_mode else None,
+        connection=connection,
         session=session,
         preview=preview_mode,
     )
@@ -289,10 +303,6 @@ async def main(connection):
         print(f"Theme '{name}' not found.")
         print("Import via: Preferences → Profiles → Colors → Color Presets → Import")
         os._exit(1)
-
-    if not preview_mode:
-        app = await iterm2.async_get_app(connection)
-        session = app.current_terminal_window.current_tab.current_session
 
     profile = await session.async_get_profile()
     await profile.async_set_color_preset(preset)
